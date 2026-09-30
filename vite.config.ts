@@ -12,6 +12,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.png', 'icons/*.svg'],
       manifest: {
+        id: '/lukas/',
         name: 'Lukas',
         short_name: 'Lukas',
         description: 'Tus finanzas del día a día, sencillas.',
@@ -19,12 +20,13 @@ export default defineConfig({
         start_url: '/lukas/',
         scope: '/lukas/',
         display: 'standalone',
+        prefer_related_applications: false,
         orientation: 'portrait',
         background_color: '#0f0f13',
         theme_color: '#0f0f13',
         icons: [
-          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
           { src: 'icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
