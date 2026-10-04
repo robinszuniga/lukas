@@ -11,6 +11,8 @@ export default {
           card: '#1a1a24',
           elevated: '#22222f',
           border: '#2a2a3a',
+          // Borde de campos de formulario: contraste 3:1 sobre las tarjetas
+          field: '#646b7a',
         },
         accent: {
           indigo: '#6366f1',
@@ -18,6 +20,10 @@ export default {
           green: '#10b981',
           red: '#f43f5e',
           yellow: '#f59e0b',
+        },
+        gray: {
+          // Gris para texto terciario y placeholders: contraste ≥ 4.5:1 sobre los fondos de la app
+          450: '#868e9c',
         },
       },
       fontFamily: {

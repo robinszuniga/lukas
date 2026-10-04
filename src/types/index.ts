@@ -145,6 +145,14 @@ export interface BackupData {
   debts: Debt[]
   accounts?: Account[]
   recurring?: Recurring[]
+  /** v2.1: bitácora de pagos (para deshacer) */
+  payment_log?: import("./extra").PaymentLogEntry[]
+  /** v2.1: recordatorios por registro */
+  reminders?: import("./extra").ReminderSetting[]
+  /** v2.1: preferencias (moneda, días de pago, recordatorios). Nunca incluye la API Key. */
+  preferences?: Record<string, unknown>
+  /** v2.1: versión del esquema de la base que generó el respaldo */
+  schema_version?: number
 }
 
 export interface MonthlyTrendPoint {
@@ -168,3 +176,5 @@ export interface ParsedTransaction {
   payment_method: string | null
   date: string
 }
+
+export * from "./extra"

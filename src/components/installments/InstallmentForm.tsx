@@ -1,133 +1,139 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
-import { parseCOP } from '@/lib/currency'
+import { amountErrorMessage, currencyInfo, formatMoney, parseMoney, roundMoney, toInputAmount } from '@/lib/money'
 import { today } from '@/lib/dates'
 import type { Installment } from '@/types'
+import { Modal } from '@/components/ui/Modal'
+import { Field, FormError } from '@/components/ui/Field'
+import { inputClass, primaryButton, secondaryButton } from '@/components/ui/styles'
+
+type InstallmentData = Omit<Installment, 'id' | 'created_at'>
 
 interface Props {
   initial?: Installment
-  onSave: (data: any) => void
+  onSave: (data: InstallmentData) => void | Promise<void>
   onClose: () => void
 }
 
 export function InstallmentForm({ initial, onSave, onClose }: Props) {
   const [name, setName] = useState(initial?.name ?? '')
-  const [totalAmount, setTotalAmount] = useState(initial ? String(initial.total_amount) : '')
+  const [totalAmount, setTotalAmount] = useState(initial ? toInputAmount(initial.total_amount) : '')
   const [totalMonths, setTotalMonths] = useState(initial ? String(initial.total_months) : '12')
   const [paidMonths, setPaidMonths] = useState(initial ? String(initial.paid_months) : '0')
   const [nextDueDate, setNextDueDate] = useState(initial?.next_due_date ?? today())
   const [notes, setNotes] = useState(initial?.notes ?? '')
-  const [monthlyOverride, setMonthlyOverride] = useState(
-    initial ? String(initial.monthly_amount) : ''
-  )
+  const [monthlyOverride, setMonthlyOverride] = useState(initial ? toInputAmount(initial.monthly_amount) : '')
   const [monthlyManual, setMonthlyManual] = useState(!!initial)
+  const [errors, setErrors] = useState<{ name?: string; total?: string; months?: string; monthly?: string }>({})
+  const [error, setError] = useState<string | null>(null)
 
-  const total = parseCOP(totalAmount) || 0
-  const months = parseInt(totalMonths) || 1
-  const calculated = months > 0 ? Math.round(total / months) : 0
+  const total = parseMoney(totalAmount) ?? 0
+  const months = parseInt(totalMonths, 10) || 0
+  const calculated = total > 0 && months > 0 ? roundMoney(total / months) : 0
 
   const updateTotal = (v: string) => {
     setTotalAmount(v)
     if (!monthlyManual) {
-      const t = parseCOP(v) || 0
-      if (t > 0 && months > 0) setMonthlyOverride(String(Math.round(t / months)))
+      const t = parseMoney(v) ?? 0
+      if (t > 0 && months > 0) setMonthlyOverride(toInputAmount(roundMoney(t / months)))
     }
   }
   const updateMonths = (v: string) => {
     setTotalMonths(v)
     if (!monthlyManual) {
-      const m = parseInt(v) || 1
-      if (total > 0 && m > 0) setMonthlyOverride(String(Math.round(total / m)))
+      const m = parseInt(v, 10) || 0
+      if (total > 0 && m > 0) setMonthlyOverride(toInputAmount(roundMoney(total / m)))
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const monthly = parseCOP(monthlyOverride) || calculated
-    if (!name || total <= 0 || months <= 0 || monthly <= 0) return
-    const paid = Math.min(Math.max(parseInt(paidMonths) || 0, 0), months)
-    onSave({
-      name,
-      total_amount: total,
-      total_months: months,
-      paid_months: paid,
-      monthly_amount: monthly,
-      next_due_date: nextDueDate || null,
-      notes: notes || null,
-    })
+    const monthly = monthlyOverride.trim() ? parseMoney(monthlyOverride) : (calculated || null)
+    const next: typeof errors = {}
+    if (!name.trim()) next.name = 'Escribe un nombre'
+    if (total <= 0) next.total = amountErrorMessage()
+    if (months < 1 || months > 600) next.months = 'Debe ser un número entre 1 y 600'
+    if (monthly === null || monthly <= 0) next.monthly = amountErrorMessage()
+    setErrors(next)
+    if (Object.keys(next).length > 0) return
+
+    const paid = Math.min(Math.max(parseInt(paidMonths, 10) || 0, 0), months)
+    try {
+      await onSave({
+        name: name.trim(),
+        total_amount: total,
+        total_months: months,
+        paid_months: paid,
+        monthly_amount: monthly!,
+        next_due_date: nextDueDate || null,
+        notes: notes.trim() || null,
+      })
+    } catch (err) {
+      setError((err as Error)?.message ?? 'No se pudo guardar')
+    }
   }
 
-  const inputClass = 'w-full bg-bg-elevated border border-bg-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-accent-indigo/50 transition-colors'
+  const mode = currencyInfo().decimals === 0 ? 'numeric' : 'decimal'
+  const monthlyValue = parseMoney(monthlyOverride)
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60]">
-      <div className="bg-bg-card border border-bg-border rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[85dvh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border shrink-0">
-          <h2 className="font-semibold text-white text-sm">{initial ? 'Editar cuota' : 'Nueva cuota'}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={18} /></button>
+    <Modal
+      title={initial ? 'Editar cuota' : 'Nueva cuota'}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={secondaryButton}>Cancelar</button>
+          <button type="submit" form="installment-form" className={primaryButton}>Guardar</button>
+        </>
+      }
+    >
+      <form id="installment-form" onSubmit={handleSubmit} noValidate className="space-y-3">
+        <Field label="Nombre" error={errors.name}>
+          {(c) => <input {...c} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Curso de inglés" className={inputClass} required />}
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Monto total" error={errors.total}>
+            {(c) => <input {...c} value={totalAmount} onChange={(e) => updateTotal(e.target.value)} placeholder="450000" inputMode={mode} autoComplete="off" className={inputClass} required />}
+          </Field>
+          <Field label="Número de cuotas" error={errors.months}>
+            {(c) => <input {...c} type="number" value={totalMonths} onChange={(e) => updateMonths(e.target.value)} min={1} max={600} className={inputClass} required />}
+          </Field>
         </div>
-
-        <form id="installment-form" onSubmit={handleSubmit} className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Nombre</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Curso de inglés" className={inputClass} required />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Monto total</label>
-              <input value={totalAmount} onChange={(e) => updateTotal(e.target.value)} placeholder="450000" inputMode="numeric" className={inputClass} required />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">N° cuotas</label>
-              <input type="number" value={totalMonths} onChange={(e) => updateMonths(e.target.value)} min={1} max={120} className={inputClass} required />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Cuotas ya pagadas</label>
-            <input type="number" value={paidMonths} onChange={(e) => setPaidMonths(e.target.value)} min={0} max={months} className={inputClass} />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">
-              Cuota mensual
-              {!monthlyManual && calculated > 0 && (
-                <span className="text-gray-700 ml-1">(calculada)</span>
-              )}
-            </label>
+        <Field label="Cuotas ya pagadas">
+          {(c) => <input {...c} type="number" value={paidMonths} onChange={(e) => setPaidMonths(e.target.value)} min={0} max={months || undefined} className={inputClass} />}
+        </Field>
+        <Field
+          label={<>Cuota mensual{!monthlyManual && calculated > 0 ? ' (calculada)' : ''}</>}
+          error={errors.monthly}
+        >
+          {(c) => (
             <input
+              {...c}
               value={monthlyOverride}
               onChange={(e) => { setMonthlyOverride(e.target.value); setMonthlyManual(true) }}
-              placeholder={calculated > 0 ? String(calculated) : '0'}
-              inputMode="numeric"
-              className={`${inputClass} border-accent-cyan/40 focus:border-accent-cyan/70`}
+              placeholder={calculated > 0 ? toInputAmount(calculated) : '0'}
+              inputMode={mode}
+              autoComplete="off"
+              className={inputClass}
             />
-            {monthlyManual && calculated > 0 && parseCOP(monthlyOverride) !== calculated && (
-              <button
-                type="button"
-                onClick={() => { setMonthlyOverride(String(calculated)); setMonthlyManual(false) }}
-                className="text-xs text-gray-600 hover:text-accent-cyan mt-1 transition-colors"
-              >
-                ↺ Usar calculada: ${calculated.toLocaleString('es-CO')}
-              </button>
-            )}
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Próxima fecha de pago</label>
-            <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Notas (opcional)</label>
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Banco Falabella" className={inputClass} />
-          </div>
-        </form>
-
-        <div
-          className="px-5 pt-3 border-t border-bg-border shrink-0 flex gap-2"
-          style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))' }}
-        >
-          <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-bg-elevated border border-bg-border text-gray-400 text-sm rounded-xl">Cancelar</button>
-          <button type="submit" form="installment-form" className="flex-1 py-2.5 bg-accent-indigo hover:bg-accent-indigo/80 text-white text-sm font-medium rounded-xl transition-colors">Guardar</button>
-        </div>
-      </div>
-    </div>
+          )}
+        </Field>
+        {monthlyManual && calculated > 0 && monthlyValue !== calculated && (
+          <button
+            type="button"
+            onClick={() => { setMonthlyOverride(toInputAmount(calculated)); setMonthlyManual(false) }}
+            className="text-xs text-accent-cyan py-1"
+          >
+            Usar la calculada: {formatMoney(calculated)}
+          </button>
+        )}
+        <Field label="Próxima fecha de pago">
+          {(c) => <input {...c} type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className={inputClass} />}
+        </Field>
+        <Field label="Notas (opcional)">
+          {(c) => <input {...c} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Banco Falabella" className={inputClass} />}
+        </Field>
+        <FormError message={error} />
+      </form>
+    </Modal>
   )
 }

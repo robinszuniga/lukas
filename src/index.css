@@ -24,6 +24,9 @@
 
 html, body {
   overscroll-behavior-y: none;
+  /* Nada debe empujar la página hacia los lados en pantallas angostas */
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 body {
@@ -36,3 +39,37 @@ input, textarea, select {
   user-select: text;
 }
 
+/*
+ * Foco visible al navegar con teclado. Va después de las utilidades y con !important
+ * porque muchos campos usan `outline-none`; con ratón o dedo no aparece (focus-visible).
+ */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #a5b4fc !important;
+  outline-offset: 2px;
+}
+
+/* El contenedor de un diálogo recibe el foco al abrirse: no necesita aro */
+[role='dialog']:focus-visible {
+  outline: none !important;
+}
+
+/* El selector nativo de fecha y de opciones se ve bien en tema oscuro */
+input[type='date'],
+input[type='month'],
+select {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,21 +1,19 @@
-export const PAYDAYS_KEY = 'lukas_paydays'
+import { getPrefs, setPrefs, PAYDAYS_KEY } from './prefs'
+
+export { PAYDAYS_KEY }
 
 /** Lee los días de pago configurados (por defecto quincena: 15 y 30) */
 export function getPaydays(): number[] {
-  let raw = '15,30'
-  try { raw = localStorage.getItem(PAYDAYS_KEY) ?? raw } catch { /* sin storage */ }
-  return raw.split(',').map((s) => parseInt(s.trim())).filter((n) => n >= 1 && n <= 31)
+  return getPrefs().paydays
 }
 
 export function setPaydays(days: number[]): void {
-  const clean = days.filter((n) => n >= 1 && n <= 31)
-  localStorage.setItem(PAYDAYS_KEY, clean.join(','))
+  setPrefs({ paydays: days })
 }
 
 /** Días que faltan hasta el próximo día de pago (0 = hoy). -1 si no hay días configurados. */
-export function daysToNextPayday(paydays: number[] = getPaydays()): number {
+export function daysToNextPayday(paydays: number[] = getPaydays(), now: Date = new Date()): number {
   if (paydays.length === 0) return -1
-  const now = new Date()
   const today = now.getDate()
   const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
 

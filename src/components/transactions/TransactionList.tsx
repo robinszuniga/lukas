@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { Trash2, TrendingUp, TrendingDown, Pencil } from 'lucide-react'
+import { Trash2, Pencil } from 'lucide-react'
 import { formatCOP } from '@/lib/currency'
 import { formatDate } from '@/lib/dates'
 import { CATEGORY_ICONS } from '@/types'
 import type { Transaction, Category } from '@/types'
 import { EditTransactionModal } from './EditTransactionModal'
+import { iconButton } from '@/components/ui/styles'
 
 interface Props {
   transactions: Transaction[]
-  onDelete: (id: number) => void
+  /** Recibe el movimiento completo: quien lo llama muestra qué se va a eliminar */
+  onDelete: (tx: Transaction) => void
   onUpdate: (id: number, data: Partial<Transaction>) => Promise<void>
 }
 
@@ -17,69 +19,55 @@ export function TransactionList({ transactions, onDelete, onUpdate }: Props) {
 
   if (transactions.length === 0) {
     return (
-      <div className="text-center py-16 text-gray-600">
-        <p className="text-4xl mb-3">📭</p>
-        <p className="text-sm">Sin transacciones para mostrar</p>
+      <div className="text-center py-16 text-gray-400">
+        <p className="text-4xl mb-3" aria-hidden="true">📭</p>
+        <p className="text-sm">No hay movimientos con estos filtros</p>
       </div>
     )
   }
 
   return (
     <>
-      <div className="space-y-2">
-        {transactions.map((tx) => (
-          <div
-            key={tx.id}
-            className="flex items-center gap-3 bg-bg-card border border-bg-border hover:border-bg-elevated rounded-xl px-4 py-3 group transition-colors"
-          >
-            <div className="w-8 h-8 rounded-lg bg-bg-elevated flex items-center justify-center text-base shrink-0">
-              {CATEGORY_ICONS[tx.category as Category] ?? '📦'}
-            </div>
+      <ul className="space-y-2">
+        {transactions.map((tx) => {
+          const name = tx.description || tx.category
+          const isIncome = tx.type === 'income'
+          return (
+            <li key={tx.id} className="bg-bg-card border border-bg-border rounded-xl pl-3 pr-1.5 py-2.5">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 mt-0.5 rounded-lg bg-bg-elevated flex items-center justify-center text-base shrink-0" aria-hidden="true">
+                  {CATEGORY_ICONS[tx.category as Category] ?? '📦'}
+                </div>
 
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-200 truncate">{tx.description || tx.category}</p>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                <span className="text-xs text-gray-600">{tx.category}</span>
-                {tx.payment_method && (
-                  <>
-                    <span className="text-gray-700">·</span>
-                    <span className="text-xs text-gray-600">{tx.payment_method}</span>
-                  </>
-                )}
-                <span className="text-gray-700">·</span>
-                <span className="text-xs text-gray-600">{formatDate(tx.date)}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline justify-between gap-2 pr-1.5">
+                    <p className="text-sm text-gray-100 truncate min-w-0">{name}</p>
+                    <p className={`shrink-0 text-sm font-semibold ${isIncome ? 'text-accent-green' : 'text-gray-100'}`}>
+                      <span className="sr-only">{isIncome ? 'Ingreso de ' : 'Gasto de '}</span>
+                      <span aria-hidden="true">{isIncome ? '+' : '−'}</span>{formatCOP(tx.amount)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-gray-400 truncate min-w-0">
+                      {tx.category}
+                      {tx.payment_method ? ` · ${tx.payment_method}` : ''}
+                      {` · ${formatDate(tx.date)}`}
+                    </p>
+                    <div className="flex items-center shrink-0">
+                      <button type="button" onClick={() => setEditing(tx)} className={iconButton} aria-label={`Editar movimiento: ${name}`}>
+                        <Pencil size={14} aria-hidden="true" />
+                      </button>
+                      <button type="button" onClick={() => onDelete(tx)} className={`${iconButton} hover:text-rose-400`} aria-label={`Eliminar movimiento: ${name}`}>
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-
-            <div className="flex items-center gap-1">
-              <div className={`flex items-center gap-1 text-sm font-semibold ${
-                tx.type === 'income' ? 'text-accent-green' : 'text-accent-red'
-              }`}>
-                {tx.type === 'income' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                {tx.type === 'income' ? '+' : '-'}{formatCOP(tx.amount)}
-              </div>
-
-              {/* Botones: siempre visibles en móvil, solo en hover en desktop */}
-              <div className="flex items-center gap-0.5 ml-2 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => setEditing(tx)}
-                  className="text-gray-600 hover:text-accent-indigo transition-colors p-1.5 rounded"
-                  title="Editar"
-                >
-                  <Pencil size={13} />
-                </button>
-                <button
-                  onClick={() => onDelete(tx.id)}
-                  className="text-gray-600 hover:text-accent-red transition-colors p-1.5 rounded"
-                  title="Eliminar"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            </li>
+          )
+        })}
+      </ul>
 
       {editing && (
         <EditTransactionModal

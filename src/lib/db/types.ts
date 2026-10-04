@@ -1,7 +1,9 @@
 import type {
   Transaction, Installment, Goal, CreditCard, Budget, TransactionSummary, Debt, BackupData,
-  Account, Recurring,
+  Account, Recurring, InstallmentPayment,
+  PaymentLogEntry, ReminderSetting, ReminderKind, EntityKind, DeletedSnapshot, RangeTotals, SpendStats,
 } from '@/types'
+import type { AIResult } from '@/lib/ai/validate'
 
 export interface TransactionFilters {
   month?: string
@@ -20,14 +22,21 @@ export interface DBService {
   updateTransaction(id: number, data: Partial<Transaction>): Promise<Transaction>
   deleteTransaction(id: number): Promise<void>
   getTransactionSummary(month: string): Promise<TransactionSummary>
+  /** Ingresos y gastos entre dos fechas (incluidas) */
+  getRangeTotals(dateFrom: string, dateTo: string): Promise<RangeTotals>
+  /** Gasto del día a día (sin pagos fijos) entre dos fechas */
+  getSpendStats(dateFrom: string, dateTo: string): Promise<SpendStats>
+  /** Deshace un registro recién creado, incluido su ajuste de saldo */
+  undoCreateTransaction(id: number): Promise<void>
 
   // Installments
   listInstallments(): Promise<Installment[]>
   createInstallment(data: Omit<Installment, 'id' | 'created_at' | 'paid_months'> & { paid_months?: number }): Promise<Installment>
   updateInstallment(id: number, data: Partial<Installment>): Promise<Installment>
   payInstallment(id: number): Promise<Installment>
+  undoPayInstallment(id: number): Promise<Installment>
   deleteInstallment(id: number): Promise<void>
-  listInstallmentPayments(installmentId: number): Promise<import('@/types').InstallmentPayment[]>
+  listInstallmentPayments(installmentId: number): Promise<InstallmentPayment[]>
 
   // Goals
   listGoals(): Promise<Goal[]>
@@ -66,16 +75,33 @@ export interface DBService {
   createRecurring(data: Omit<Recurring, 'id' | 'created_at' | 'last_posted'>): Promise<Recurring>
   updateRecurring(id: number, data: Partial<Recurring>): Promise<Recurring>
   postRecurring(id: number): Promise<Recurring>
+  undoPostRecurring(id: number): Promise<Recurring>
   deleteRecurring(id: number): Promise<void>
+
+  /** Último pago en la bitácora por cada cuota o pago fijo (para ofrecer "Deshacer") */
+  listLastPayments(): Promise<PaymentLogEntry[]>
+
+  // Recordatorios
+  listReminders(): Promise<ReminderSetting[]>
+  setReminder(
+    kind: ReminderKind,
+    itemId: number,
+    patch: Partial<Pick<ReminderSetting, 'enabled' | 'days_before' | 'snoozed_until'>>,
+  ): Promise<ReminderSetting>
+
+  // Eliminar con copia y restaurar ("Deshacer")
+  deleteWithSnapshot(kind: EntityKind, id: number): Promise<DeletedSnapshot>
+  restoreSnapshot(snapshot: DeletedSnapshot): Promise<void>
 
   // Backup (exportar/importar todo)
   exportBackup(): Promise<BackupData>
   importBackup(data: BackupData): Promise<void>
+  countRecords(): Promise<Record<string, number>>
 
-  // AI key (platform-specific storage)
+  // AI key (se guarda solo en este dispositivo)
   getApiKey(): Promise<string | null>
   saveApiKey(key: string): Promise<void>
 
-  // AI (Gemini) — registra transacciones o responde preguntas con contexto
-  parseWithAI(text: string, apiKey: string, signal?: AbortSignal, context?: string): Promise<import('@/lib/ai/validate').AIResult>
+  // AI (Gemini) — registra transacciones o responde preguntas
+  parseWithAI(text: string, apiKey: string, signal?: AbortSignal, context?: string): Promise<AIResult>
 }

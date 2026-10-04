@@ -11,6 +11,7 @@ const links = [
 export function BottomNav() {
   return (
     <nav
+      aria-label="Secciones principales"
       className="fixed bottom-0 left-0 right-0 z-50 bg-bg-card/95 backdrop-blur border-t border-bg-border"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
@@ -22,11 +23,11 @@ export function BottomNav() {
             end={to === '/'}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center gap-1 flex-1 min-w-0 transition-colors ${
-                isActive ? 'text-accent-indigo' : 'text-gray-500 active:text-gray-300'
+                isActive ? 'text-indigo-300' : 'text-gray-400 active:text-gray-200'
               }`
             }
           >
-            <Icon size={22} strokeWidth={1.9} />
+            <Icon size={22} strokeWidth={1.9} aria-hidden="true" />
             <span className="text-[11px] font-medium truncate">{label}</span>
           </NavLink>
         ))}

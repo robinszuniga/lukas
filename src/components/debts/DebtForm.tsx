@@ -1,102 +1,105 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
-import { parseCOP } from '@/lib/currency'
+import { amountErrorMessage, currencyInfo, parseMoney, toInputAmount } from '@/lib/money'
 import type { Debt, DebtType } from '@/types'
+import { Modal } from '@/components/ui/Modal'
+import { Field, FormError } from '@/components/ui/Field'
+import { inputClass, primaryButton, secondaryButton } from '@/components/ui/styles'
 
 interface Props {
   initial?: Debt
-  onSave: (data: Omit<Debt, 'id' | 'created_at' | 'paid'>) => void
+  onSave: (data: Omit<Debt, 'id' | 'created_at' | 'paid'>) => void | Promise<void>
   onClose: () => void
 }
 
 export function DebtForm({ initial, onSave, onClose }: Props) {
   const [type, setType] = useState<DebtType>(initial?.type ?? 'owed_to_me')
   const [person, setPerson] = useState(initial?.person ?? '')
-  const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
+  const [amount, setAmount] = useState(initial ? toInputAmount(initial.amount) : '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [dueDate, setDueDate] = useState(initial?.due_date ?? '')
+  const [errors, setErrors] = useState<{ person?: string; amount?: string }>({})
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const val = parseCOP(amount)
-    if (!person.trim() || val <= 0) return
-    onSave({
-      person: person.trim(),
-      amount: val,
-      type,
-      description: description.trim() || null,
-      due_date: dueDate || null,
-    })
+    const val = parseMoney(amount)
+    const next: typeof errors = {}
+    if (!person.trim()) next.person = 'Escribe un nombre'
+    if (val === null) next.amount = amountErrorMessage()
+    setErrors(next)
+    if (Object.keys(next).length > 0) return
+
+    try {
+      await onSave({
+        person: person.trim(),
+        amount: val!,
+        type,
+        description: description.trim() || null,
+        due_date: dueDate || null,
+      })
+    } catch (err) {
+      setError((err as Error)?.message ?? 'No se pudo guardar')
+    }
   }
 
-  const inputClass = 'w-full bg-bg-elevated border border-bg-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-accent-indigo/50 transition-colors'
+  const typeButton = (value: DebtType, label: string, arrow: string, activeClass: string) => (
+    <button
+      type="button"
+      aria-pressed={type === value}
+      onClick={() => setType(value)}
+      className={`py-2.5 rounded-lg text-sm font-medium transition-colors border ${
+        type === value ? activeClass : 'bg-bg-elevated border-bg-field text-gray-400 hover:text-gray-200'
+      }`}
+    >
+      <span aria-hidden="true">{arrow} </span>{label}
+    </button>
+  )
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-[60]">
-      <div className="bg-bg-card border border-bg-border rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[85dvh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border shrink-0">
-          <h2 className="font-semibold text-white text-sm">{initial ? 'Editar deuda' : 'Nueva deuda'}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={18} /></button>
+    <Modal
+      title={initial ? 'Editar deuda' : 'Nueva deuda'}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={secondaryButton}>Cancelar</button>
+          <button type="submit" form="debt-form" className={primaryButton}>Guardar</button>
+        </>
+      }
+    >
+      <form id="debt-form" onSubmit={handleSubmit} noValidate className="space-y-3">
+        <div role="group" aria-label="Tipo de deuda" className="grid grid-cols-2 gap-2">
+          {typeButton('owed_to_me', 'Me deben', '↙', 'bg-accent-green/20 border-accent-green/60 text-accent-green')}
+          {typeButton('i_owe', 'Yo debo', '↗', 'bg-accent-red/20 border-accent-red/60 text-rose-400')}
         </div>
 
-        <form id="debt-form" onSubmit={handleSubmit} className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
-          {/* Dirección de la deuda */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setType('owed_to_me')}
-              className={`py-2.5 rounded-lg text-sm font-medium transition-colors border ${
-                type === 'owed_to_me'
-                  ? 'bg-accent-green/20 border-accent-green/50 text-accent-green'
-                  : 'bg-bg-elevated border-bg-border text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              ↙ Me deben
-            </button>
-            <button
-              type="button"
-              onClick={() => setType('i_owe')}
-              className={`py-2.5 rounded-lg text-sm font-medium transition-colors border ${
-                type === 'i_owe'
-                  ? 'bg-accent-red/20 border-accent-red/50 text-accent-red'
-                  : 'bg-bg-elevated border-bg-border text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              ↗ Yo debo
-            </button>
-          </div>
+        <Field label={type === 'owed_to_me' ? '¿Quién te debe?' : '¿A quién le debes?'} error={errors.person}>
+          {(c) => <input {...c} value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Ej: Carlos, Mamá, Trabajo…" className={inputClass} required />}
+        </Field>
 
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">
-              {type === 'owed_to_me' ? '¿Quién te debe?' : '¿A quién le debes?'}
-            </label>
-            <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Ej: Carlos, Mamá, Trabajo…" className={inputClass} required />
-          </div>
+        <Field label="Monto" error={errors.amount}>
+          {(c) => (
+            <input
+              {...c}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="80000"
+              inputMode={currencyInfo().decimals === 0 ? 'numeric' : 'decimal'}
+              autoComplete="off"
+              className={inputClass}
+              required
+            />
+          )}
+        </Field>
 
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Monto</label>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="80000" inputMode="numeric" className={inputClass} required />
-          </div>
+        <Field label="Motivo (opcional)">
+          {(c) => <input {...c} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ej: Préstamo para el almuerzo" className={inputClass} />}
+        </Field>
 
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Motivo (opcional)</label>
-            <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ej: Préstamo para el almuerzo" className={inputClass} />
-          </div>
-
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Fecha límite (opcional)</label>
-            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
-          </div>
-        </form>
-
-        <div
-          className="px-5 pt-3 border-t border-bg-border shrink-0 flex gap-2"
-          style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))' }}
-        >
-          <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-bg-elevated border border-bg-border text-gray-400 text-sm rounded-xl">Cancelar</button>
-          <button type="submit" form="debt-form" className="flex-1 py-2.5 bg-accent-indigo hover:bg-accent-indigo/80 text-white text-sm font-medium rounded-xl transition-colors">Guardar</button>
-        </div>
-      </div>
-    </div>
+        <Field label="Fecha límite (opcional)" hint="Con fecha límite puedes recibir un recordatorio.">
+          {(c) => <input {...c} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />}
+        </Field>
+        <FormError message={error} />
+      </form>
+    </Modal>
   )
 }
