@@ -46,7 +46,7 @@ Los datos viven solo en el dispositivo: no hay cuentas, servidores ni sincroniza
   - El método se elige con botones (cuentas, tarjetas y Efectivo) o en «Otro». Debajo se ve qué saldo se mueve; si el nombre no corresponde a ninguna cuenta ni tarjeta, se avisa que no se moverá ningún saldo.
   - Se ajustan al *crear* un movimiento (Registrar rápido, Con IA) y al *pagar* un pago fijo. Lukas anota cuánto movió cada movimiento (tabla `balance_moves`), así «Deshacer» devuelve exactamente eso.
   - **Editar**: si cambia el monto, el tipo o el método de pago, Lukas muestra el ajuste neto («Devolver $60.000 a Sobre», «Descontar $60.000 de Nequi») y pregunta: «Ajustar saldos y guardar» o «Solo guardar el cambio». En movimientos registrados antes de la 2.2 avisa que no sabe si ya se había descontado.
-  - **Eliminar** no recalcula saldos (pueden haberse ajustado a mano); el diálogo de eliminación lo avisa.
+  - **Eliminar** devuelve a cada cuenta o tarjeta lo que el movimiento había movido, según lo anotado; el diálogo muestra cuánto («Devolver $50.000 a Sobre»). «Deshacer» lo vuelve a descontar. En movimientos registrados antes de la 2.2 no hay anotación: no se devuelve nada y el diálogo lo avisa.
 
 ### Moneda y montos
 

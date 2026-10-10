@@ -164,25 +164,51 @@ export class SqlDBService implements DBService {
       net.set(key, { target, target_id: targetId, name, delta: (prev?.delta ?? 0) + delta })
     }
 
-    const recorded = this.rows<BalanceMoveRow>(await this.db.query(
-      'SELECT * FROM balance_moves WHERE transaction_id=?', [id]
-    ))
-    for (const m of recorded) {
-      const name = await this.targetName(m.target, m.target_id)
-      if (name !== null) add(m.target, m.target_id, name, -m.delta)
-    }
+    const recorded = await this.recordedRefunds(id)
+    for (const m of recorded) add(m.target, m.target_id, m.name, m.delta)
     for (const t of await this.paymentTargets(merged.payment_method)) {
       add(t.target, t.id, t.name, balanceDelta(t.target, merged.type, merged.amount))
     }
 
-    // Sin anotación no se sabe si al registrarlo se descontó; los pagos fijos de antes de la 2.2 nunca descontaban
-    const fromRecurring = recorded.length === 0 && !!this.row(await this.db.query(
-      "SELECT 1 FROM payment_log WHERE kind='recurring' AND transaction_id=?", [id]
+    return {
+      moves: [...net.values()].filter((m) => Math.abs(m.delta) > 1e-9),
+      untracked: recorded.length === 0 ? await this.untrackedTargets(existing) : [],
+    }
+  }
+
+  /** Qué les devolvería a los saldos eliminar el movimiento (no cambia nada). */
+  async planTransactionDelete(id: number): Promise<BalancePlan> {
+    const existing = this.row<Transaction>(await this.db.query('SELECT * FROM transactions WHERE id=?', [id]))
+    if (!existing) throw new Error('El movimiento ya no existe')
+    const moves = await this.recordedRefunds(id)
+    return { moves, untracked: moves.length === 0 ? await this.untrackedTargets(existing) : [] }
+  }
+
+  /** Lo anotado para un movimiento, en sentido contrario: lo que habría que devolver. */
+  private async recordedRefunds(txId: number): Promise<BalanceMove[]> {
+    const recorded = this.rows<BalanceMoveRow>(await this.db.query(
+      'SELECT * FROM balance_moves WHERE transaction_id=? ORDER BY id', [txId]
     ))
-    const untracked = recorded.length === 0 && !fromRecurring
-      ? (await this.paymentTargets(existing.payment_method)).map((t) => t.name)
-      : []
-    return { moves: [...net.values()].filter((m) => Math.abs(m.delta) > 1e-9), untracked }
+    const out: BalanceMove[] = []
+    for (const m of recorded) {
+      const name = await this.targetName(m.target, m.target_id)
+      if (name !== null) out.push({ target: m.target, target_id: m.target_id, name, delta: -m.delta })
+    }
+    return out
+  }
+
+  /**
+   * Movimiento sin anotación: no se sabe si al registrarlo se descontó (antes de la 2.2).
+   * Devuelve las cuentas o tarjetas de su método. Los pagos fijos de antes nunca descontaban.
+   */
+  private async untrackedTargets(tx: Transaction): Promise<string[]> {
+    const anyMove = this.row(await this.db.query('SELECT 1 FROM balance_moves WHERE transaction_id=?', [tx.id]))
+    if (anyMove) return []
+    const fromRecurring = this.row(await this.db.query(
+      "SELECT 1 FROM payment_log WHERE kind='recurring' AND transaction_id=?", [tx.id]
+    ))
+    if (fromRecurring) return []
+    return (await this.paymentTargets(tx.payment_method)).map((t) => t.name)
   }
 
   private async targetName(target: BalanceTarget, id: number): Promise<string | null> {
@@ -686,7 +712,7 @@ export class SqlDBService implements DBService {
     // Lo que cuelga del registro: [tabla, condición, parámetros]
     const dependents: [string, string, unknown[]][] = []
     if (kind === 'installment') dependents.push(['installment_payments', 'installment_id=?', [id]])
-    // Eliminar no toca los saldos, pero la anotación viaja con el movimiento por si se restaura
+    // La anotación viaja con el movimiento: al restaurarlo se vuelve a descontar
     if (kind === 'transaction') dependents.push(['balance_moves', 'transaction_id=?', [id]])
     if (kind === 'installment' || kind === 'recurring') dependents.push(['payment_log', 'kind=? AND item_id=?', [kind, id]])
     if (kind === 'installment' || kind === 'recurring' || kind === 'debt') dependents.push(['reminders', 'kind=? AND item_id=?', [kind, id]])
@@ -698,6 +724,8 @@ export class SqlDBService implements DBService {
     }
 
     await this.db.batch(async () => {
+      // Eliminar un movimiento devuelve a los saldos lo que había movido
+      if (kind === 'transaction') await this.revertBalanceMoves(id)
       for (const [depTable, where, params] of dependents) {
         await this.db.run(`DELETE FROM ${depTable} WHERE ${where}`, params)
       }
@@ -709,8 +737,16 @@ export class SqlDBService implements DBService {
   /** Vuelve a insertar lo eliminado con sus identificadores originales. */
   async restoreSnapshot(snapshot: DeletedSnapshot): Promise<void> {
     await this.db.batch(async () => {
-      for (const { table, row } of snapshot.rows) {
+      for (const { table, row: original } of snapshot.rows) {
         if (!isTableName(table)) throw new Error('No se pudo restaurar el registro')
+        let row = original
+        if (table === 'balance_moves') {
+          // Se vuelve a descontar lo que se había devuelto al eliminar (lo que de verdad cambie)
+          const m = original as unknown as BalanceMoveRow
+          const applied = await this.shiftBalance(m.target, m.target_id, m.delta)
+          if (applied === 0) continue
+          row = { ...original, delta: applied }
+        }
         const cols = Object.keys(row).filter((c) => TABLE_COLUMNS[table].includes(c))
         if (cols.length === 0) continue
         await this.db.run(

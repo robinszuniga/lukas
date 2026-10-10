@@ -5,15 +5,15 @@ import { Header } from '@/components/layout/Header'
 import { TransactionList } from '@/components/transactions/TransactionList'
 import { TransactionFilters } from '@/components/transactions/TransactionFilters'
 import { useTransactions } from '@/hooks/useTransactions'
-import { useAccounts, useCards } from '@/hooks/useLists'
 import { useDeleteWithUndo } from '@/hooks/useDeleteWithUndo'
 import { currentMonth, formatDate, monthLabel } from '@/lib/dates'
 import { formatCOP } from '@/lib/currency'
 import { getCurrencyCode, plainAmount } from '@/lib/money'
 import { CATEGORY_ICONS, CATEGORY_COLORS } from '@/types'
-import type { Transaction } from '@/types'
+import type { BalancePlan, Transaction } from '@/types'
 import { iconButton } from '@/components/ui/styles'
-import { matchPaymentTargets } from '@/lib/paymentMethod'
+import { describeMove } from '@/lib/paymentMethod'
+import { db } from '@/lib/db'
 
 /** CSV con importes planos (punto decimal, sin miles) y la moneda en su propia columna. */
 function exportCSV(transactions: Transaction[], month: string) {
@@ -52,8 +52,6 @@ export function Historial() {
     type: type || undefined,
     category: category || undefined,
   })
-  const { accounts } = useAccounts()
-  const { cards } = useCards()
   const confirmDelete = useDeleteWithUndo()
 
   const filtered = useMemo(() => {
@@ -67,8 +65,12 @@ export function Historial() {
     )
   }, [transactions, search])
 
-  const handleDelete = (tx: Transaction) => {
-    const linked = matchPaymentTargets(tx.payment_method, accounts, cards)[0]?.name
+  const handleDelete = async (tx: Transaction) => {
+    // Lo que se devolvería a cada cuenta o tarjeta al eliminarlo
+    let plan: BalancePlan = { moves: [], untracked: [] }
+    try { plan = await db.planTransactionDelete(tx.id) } catch { /* si ya no existe, eliminar lo avisa */ }
+    const refund = plan.moves.map(describeMove).join(' · ')
+    const untracked = plan.untracked.map((n) => `«${n}»`).join(' y ')
 
     return confirmDelete({
       kind: 'transaction',
@@ -79,10 +81,13 @@ export function Historial() {
         { label: 'Monto', value: formatCOP(tx.amount) },
         { label: 'Categoría', value: tx.category },
         { label: 'Fecha', value: formatDate(tx.date) },
+        ...(refund ? [{ label: 'Saldo', value: refund }] : []),
       ],
-      note: linked
-        ? `Los totales y presupuestos se actualizan solos. El saldo de «${linked}» no se ajusta: corrígelo en Tarjetas si hace falta. Podrás deshacer justo después.`
-        : 'Los totales y presupuestos se actualizan solos. Podrás deshacerlo justo después.',
+      note: untracked
+        ? `Los totales y presupuestos se actualizan solos. Este movimiento es de antes de que Lukas anotara qué saldo tocó, así que el saldo de ${untracked} no se ajusta: corrígelo en Tarjetas → Cuentas si hace falta. Podrás deshacerlo justo después.`
+        : refund
+          ? 'Los totales, presupuestos y saldos se actualizan solos. Si lo deshaces justo después, el dinero se vuelve a descontar.'
+          : 'Los totales y presupuestos se actualizan solos. Podrás deshacerlo justo después.',
       doneMessage: 'Movimiento eliminado',
     })
   }
