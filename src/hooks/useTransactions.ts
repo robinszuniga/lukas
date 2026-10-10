@@ -27,6 +27,8 @@ export function useTransactions(filters?: TransactionFilters) {
     loading,
     refresh,
     createTransaction: (tx: Omit<Transaction, 'id' | 'created_at'>) => db.createTransaction(tx),
-    updateTransaction: async (id: number, patch: Partial<Transaction>) => { await db.updateTransaction(id, patch) },
+    updateTransaction: async (id: number, patch: Partial<Transaction>, options?: { adjustBalances?: boolean }) => {
+      await db.updateTransaction(id, patch, options)
+    },
   }
 }

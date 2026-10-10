@@ -5,6 +5,8 @@ import { buildBudgetLines, budgetState, budgetTotals } from './budgets'
 import { compareTotals, projectBalance } from './insights'
 import { activeReminders, collectDueItems, dueLabel, isSnoozed, nextRecurringDue } from './reminders'
 import { daysToNextPayday } from './paydays'
+import { balanceDelta, describeMove, matchPaymentTargets, normalizeName } from './paymentMethod'
+import { formatMoney } from './money'
 
 describe('fechas en hora local', () => {
   it('a las 11 p. m. "hoy" sigue siendo hoy (antes saltaba a mañana por usar UTC)', () => {
@@ -193,5 +195,44 @@ describe('recordatorios', () => {
     expect(dueLabel(5)).toBe('vence en 5 días')
     expect(dueLabel(-1)).toBe('venció ayer')
     expect(dueLabel(-12)).toBe('venció hace 12 días')
+  })
+})
+
+describe('método de pago ↔ cuentas y tarjetas', () => {
+  const accounts = [{ id: 2, name: 'SOBRE ALIMENTACIÓN' }, { id: 1, name: 'Nu' }, { id: 3, name: 'sobre alimentacion' }]
+  const cards = [{ id: 7, bank_name: 'Nu' }, { id: 8, bank_name: 'Ñapa Card' }]
+
+  it('compara sin mayúsculas, tildes ni espacios de más', () => {
+    expect(normalizeName('  SOBRE   ALIMENTACIÓN ')).toBe('sobre alimentacion')
+    expect(normalizeName('Ñapa')).toBe('napa')
+    expect(normalizeName(null)).toBe('')
+  })
+
+  it('encuentra la cuenta aunque el nombre tenga mayúsculas con tilde (antes no la encontraba)', () => {
+    expect(matchPaymentTargets('sobre alimentacion', accounts, cards)).toEqual([
+      { target: 'account', id: 2, name: 'SOBRE ALIMENTACIÓN' },
+    ])
+    expect(matchPaymentTargets('ñapa card', accounts, cards)).toEqual([{ target: 'card', id: 8, name: 'Ñapa Card' }])
+  })
+
+  it('con el mismo nombre en cuenta y tarjeta mueve ambas; sin coincidencia, ninguna', () => {
+    expect(matchPaymentTargets('nu', accounts, cards).map((t) => t.target)).toEqual(['account', 'card'])
+    expect(matchPaymentTargets('sobre', accounts, cards)).toEqual([])
+    expect(matchPaymentTargets('   ', accounts, cards)).toEqual([])
+  })
+
+  it('un gasto baja la cuenta y sube la deuda de la tarjeta; un ingreso al revés', () => {
+    expect(balanceDelta('account', 'expense', 50)).toBe(-50)
+    expect(balanceDelta('account', 'income', 50)).toBe(50)
+    expect(balanceDelta('card', 'expense', 50)).toBe(50)
+    expect(balanceDelta('card', 'income', 50)).toBe(-50)
+  })
+
+  it('describe cada ajuste en palabras', () => {
+    const m = formatMoney(50_000)
+    expect(describeMove({ target: 'account', name: 'Sobre', delta: -50_000 })).toBe(`Descontar ${m} de Sobre`)
+    expect(describeMove({ target: 'account', name: 'Sobre', delta: 50_000 })).toBe(`Devolver ${m} a Sobre`)
+    expect(describeMove({ target: 'card', name: 'Nu', delta: 50_000 })).toBe(`Sumar ${m} a la deuda de Nu`)
+    expect(describeMove({ target: 'card', name: 'Nu', delta: -50_000 })).toBe(`Restar ${m} de la deuda de Nu`)
   })
 })

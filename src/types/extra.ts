@@ -43,6 +43,40 @@ export interface DeletedSnapshot {
   rows: { table: string; row: Record<string, unknown> }[]
 }
 
+export type BalanceTarget = 'account' | 'card'
+
+/**
+ * v2.2: lo que un movimiento le sumó o restó a una cuenta o tarjeta.
+ * Permite deshacerlo o corregirlo exacto, sin adivinar.
+ */
+export interface BalanceMoveRow {
+  id: number
+  transaction_id: number
+  target: BalanceTarget
+  target_id: number
+  /** Cambio real aplicado al saldo (cuenta: `balance`; tarjeta: `current_balance`) */
+  delta: number
+  created_at: string
+}
+
+/** Cambio neto que sufriría una cuenta o tarjeta */
+export interface BalanceMove {
+  target: BalanceTarget
+  target_id: number
+  name: string
+  delta: number
+}
+
+/** Qué pasaría con los saldos al guardar la edición de un movimiento */
+export interface BalancePlan {
+  moves: BalanceMove[]
+  /**
+   * Cuentas o tarjetas del método anterior cuando el movimiento no tiene anotado
+   * qué saldo tocó (registrado antes de la 2.2): no se sabe si ya se descontó.
+   */
+  untracked: string[]
+}
+
 /** Totales de un rango de fechas */
 export interface RangeTotals {
   income: number

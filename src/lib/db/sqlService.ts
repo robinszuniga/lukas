@@ -4,7 +4,8 @@ import type {
   TransactionSummary, Debt, BackupData,
   Account, Recurring,
   PaymentLogEntry, ReminderSetting, ReminderKind, EntityKind, DeletedSnapshot,
-  RangeTotals, SpendStats,
+  RangeTotals, SpendStats, TransactionType,
+  BalanceMoveRow, BalancePlan, BalanceMove, BalanceTarget,
 } from '@/types'
 import type { SqlConn } from './conn'
 import { BACKUP_TABLES, SCHEMA_VERSION, TABLE_COLUMNS, isTableName, runMigrations } from './schema'
@@ -12,6 +13,7 @@ import { sanitizeBackup } from '@/lib/backupFormat'
 import { askGemini } from '@/lib/ai/client'
 import type { AIResult } from '@/lib/ai/validate'
 import { addMonths, currentMonth, today } from '@/lib/dates'
+import { balanceDelta, matchPaymentTargets, normalizeName, type PaymentTarget } from '@/lib/paymentMethod'
 import { storageGet, storageSet, storageRemove } from '@/lib/storage'
 
 const API_KEY_STORAGE = 'lukas_gemini_api_key'
@@ -79,43 +81,122 @@ export class SqlDBService implements DBService {
   }
 
   async createTransaction(data: Omit<Transaction, 'id' | 'created_at'>): Promise<Transaction> {
-    const r = await this.db.run(
-      'INSERT INTO transactions (amount, type, category, description, payment_method, date) VALUES (?,?,?,?,?,?)',
-      [data.amount, data.type, data.category, data.description ?? null, data.payment_method ?? null, data.date]
-    )
-    await this.syncPaymentMethod(data.payment_method ?? null, data.amount, data.type)
-    return this.row<Transaction>(await this.db.query(
-      'SELECT * FROM transactions WHERE id = ?', [r.changes?.lastId]
-    ))!
+    const id = await this.db.batch(async () => {
+      const r = await this.db.run(
+        'INSERT INTO transactions (amount, type, category, description, payment_method, date) VALUES (?,?,?,?,?,?)',
+        [data.amount, data.type, data.category, data.description ?? null, data.payment_method ?? null, data.date]
+      )
+      const txId = r.changes?.lastId
+      if (txId == null) throw new Error('No se pudo guardar el movimiento')
+      await this.applyBalanceMoves(txId, data.payment_method ?? null, data.amount, data.type)
+      return txId
+    })
+    return this.row<Transaction>(await this.db.query('SELECT * FROM transactions WHERE id = ?', [id]))!
   }
 
-  private async syncPaymentMethod(paymentMethod: string | null, amount: number, type: string) {
-    if (!paymentMethod) return
-    const norm = paymentMethod.trim().toLowerCase()
+  // ─────────────── SALDOS: qué cuenta o tarjeta mueve cada movimiento ───────────────
 
-    const accR = await this.db.query(
-      'SELECT * FROM accounts WHERE lower(trim(name)) = ?', [norm]
-    )
-    const account = this.row<Account>(accR)
-    if (account) {
-      const delta = type === 'expense' ? -amount : amount
-      await this.db.run('UPDATE accounts SET balance = ? WHERE id = ?',
-        [account.balance + delta, account.id])
+  /** Cuenta y tarjeta cuyo nombre coincide con el método de pago (sin mayúsculas ni tildes). */
+  private async paymentTargets(method: string | null | undefined): Promise<PaymentTarget[]> {
+    if (!normalizeName(method)) return []
+    const accounts = this.rows<Pick<Account, 'id' | 'name'>>(await this.db.query('SELECT id, name FROM accounts', []))
+    const cards = this.rows<Pick<CreditCard, 'id' | 'bank_name'>>(await this.db.query('SELECT id, bank_name FROM credit_cards', []))
+    return matchPaymentTargets(method, accounts, cards)
+  }
+
+  /**
+   * Mueve el saldo de una cuenta o tarjeta y devuelve cuánto cambió de verdad:
+   * la deuda de una tarjeta no baja de cero, y si ya no existe no cambia nada.
+   */
+  private async shiftBalance(target: BalanceTarget, id: number, delta: number): Promise<number> {
+    if (target === 'account') {
+      const acc = this.row<Pick<Account, 'balance'>>(await this.db.query('SELECT balance FROM accounts WHERE id=?', [id]))
+      if (!acc) return 0
+      await this.db.run('UPDATE accounts SET balance=? WHERE id=?', [acc.balance + delta, id])
+      return delta
     }
+    const card = this.row<Pick<CreditCard, 'current_balance'>>(await this.db.query('SELECT current_balance FROM credit_cards WHERE id=?', [id]))
+    if (!card) return 0
+    const next = Math.max(0, card.current_balance + delta)
+    await this.db.run('UPDATE credit_cards SET current_balance=? WHERE id=?', [next, id])
+    return next - card.current_balance
+  }
 
-    const cardR = await this.db.query(
-      'SELECT * FROM credit_cards WHERE lower(trim(bank_name)) = ?', [norm]
-    )
-    const card = this.row<CreditCard>(cardR)
-    if (card) {
-      const delta = type === 'expense' ? amount : -amount
-      const newBal = Math.max(0, card.current_balance + delta)
-      await this.db.run('UPDATE credit_cards SET current_balance = ? WHERE id = ?',
-        [newBal, card.id])
+  /** Aplica a los saldos el efecto de un movimiento y anota cuánto movió, para poder revertirlo exacto. */
+  private async applyBalanceMoves(txId: number, method: string | null, amount: number, type: TransactionType) {
+    for (const t of await this.paymentTargets(method)) {
+      const applied = await this.shiftBalance(t.target, t.id, balanceDelta(t.target, type, amount))
+      if (applied === 0) continue
+      await this.db.run(
+        'INSERT INTO balance_moves (transaction_id, target, target_id, delta) VALUES (?,?,?,?)',
+        [txId, t.target, t.id, applied]
+      )
     }
   }
 
-  async updateTransaction(id: number, data: Partial<Transaction>): Promise<Transaction> {
+  /** Devuelve a los saldos lo que el movimiento les había movido (según lo anotado) y borra la anotación. */
+  private async revertBalanceMoves(txId: number) {
+    const moves = this.rows<BalanceMoveRow>(await this.db.query(
+      'SELECT * FROM balance_moves WHERE transaction_id=? ORDER BY id DESC', [txId]
+    ))
+    for (const m of moves) await this.shiftBalance(m.target, m.target_id, -m.delta)
+    await this.db.run('DELETE FROM balance_moves WHERE transaction_id=?', [txId])
+  }
+
+  /**
+   * Qué les pasaría a los saldos si el movimiento quedara con estos datos: el cambio neto
+   * por cuenta o tarjeta (se devuelve lo anotado y se aplica lo nuevo). Si no cambian el
+   * monto, el tipo ni el método de pago, no hay nada que ajustar.
+   */
+  async planBalanceUpdate(id: number, data: Partial<Transaction>): Promise<BalancePlan> {
+    const existing = this.row<Transaction>(await this.db.query('SELECT * FROM transactions WHERE id=?', [id]))
+    if (!existing) throw new Error('El movimiento ya no existe')
+    const merged = { ...existing, ...data }
+    const changed = merged.amount !== existing.amount
+      || merged.type !== existing.type
+      || normalizeName(merged.payment_method) !== normalizeName(existing.payment_method)
+    if (!changed) return { moves: [], untracked: [] }
+
+    const net = new Map<string, BalanceMove>()
+    const add = (target: BalanceTarget, targetId: number, name: string, delta: number) => {
+      const key = `${target}:${targetId}`
+      const prev = net.get(key)
+      net.set(key, { target, target_id: targetId, name, delta: (prev?.delta ?? 0) + delta })
+    }
+
+    const recorded = this.rows<BalanceMoveRow>(await this.db.query(
+      'SELECT * FROM balance_moves WHERE transaction_id=?', [id]
+    ))
+    for (const m of recorded) {
+      const name = await this.targetName(m.target, m.target_id)
+      if (name !== null) add(m.target, m.target_id, name, -m.delta)
+    }
+    for (const t of await this.paymentTargets(merged.payment_method)) {
+      add(t.target, t.id, t.name, balanceDelta(t.target, merged.type, merged.amount))
+    }
+
+    // Sin anotación no se sabe si al registrarlo se descontó; los pagos fijos de antes de la 2.2 nunca descontaban
+    const fromRecurring = recorded.length === 0 && !!this.row(await this.db.query(
+      "SELECT 1 FROM payment_log WHERE kind='recurring' AND transaction_id=?", [id]
+    ))
+    const untracked = recorded.length === 0 && !fromRecurring
+      ? (await this.paymentTargets(existing.payment_method)).map((t) => t.name)
+      : []
+    return { moves: [...net.values()].filter((m) => Math.abs(m.delta) > 1e-9), untracked }
+  }
+
+  private async targetName(target: BalanceTarget, id: number): Promise<string | null> {
+    const r = target === 'account'
+      ? this.row<{ name: string }>(await this.db.query('SELECT name FROM accounts WHERE id=?', [id]))
+      : this.row<{ name: string }>(await this.db.query('SELECT bank_name AS name FROM credit_cards WHERE id=?', [id]))
+    return r?.name ?? null
+  }
+
+  /**
+   * Edita un movimiento. Con `adjustBalances` también corrige los saldos: devuelve lo que
+   * había movido y aplica lo nuevo. Sin él, los saldos quedan como estaban.
+   */
+  async updateTransaction(id: number, data: Partial<Transaction>, options?: { adjustBalances?: boolean }): Promise<Transaction> {
     // Fetch first so undefined Partial fields don't overwrite existing values with NULL
     const existing = this.row<Transaction>(
       await this.db.query('SELECT * FROM transactions WHERE id=?', [id])
@@ -123,11 +204,17 @@ export class SqlDBService implements DBService {
     if (!existing) throw new Error(`Transacción ${id} no encontrada`)
 
     const merged = { ...existing, ...data }
-    await this.db.run(
-      'UPDATE transactions SET amount=?,type=?,category=?,description=?,payment_method=?,date=? WHERE id=?',
-      [merged.amount, merged.type, merged.category,
-       merged.description ?? null, merged.payment_method ?? null, merged.date, id]
-    )
+    await this.db.batch(async () => {
+      await this.db.run(
+        'UPDATE transactions SET amount=?,type=?,category=?,description=?,payment_method=?,date=? WHERE id=?',
+        [merged.amount, merged.type, merged.category,
+         merged.description ?? null, merged.payment_method ?? null, merged.date, id]
+      )
+      if (options?.adjustBalances) {
+        await this.revertBalanceMoves(id)
+        await this.applyBalanceMoves(id, merged.payment_method ?? null, merged.amount, merged.type)
+      }
+    })
     return this.row<Transaction>(await this.db.query('SELECT * FROM transactions WHERE id=?', [id]))!
   }
 
@@ -437,8 +524,7 @@ export class SqlDBService implements DBService {
     const tx = this.row<Transaction>(await this.db.query('SELECT * FROM transactions WHERE id=?', [id]))
     if (!tx) return
     await this.db.batch(async () => {
-      // El ajuste inverso es el mismo cálculo con el tipo contrario
-      await this.syncPaymentMethod(tx.payment_method, tx.amount, tx.type === 'expense' ? 'income' : 'expense')
+      await this.revertBalanceMoves(id)
       await this.db.run('DELETE FROM transactions WHERE id=?', [id])
     })
   }
@@ -504,10 +590,13 @@ export class SqlDBService implements DBService {
         "INSERT INTO transactions (amount, type, category, description, payment_method, date) VALUES (?,'expense',?,?,?,?)",
         [rec.amount, rec.category, rec.name, rec.payment_method ?? null, today()]
       )
+      const txId = tx.changes?.lastId
+      if (txId == null) throw new Error('No se pudo registrar el pago')
+      await this.applyBalanceMoves(txId, rec.payment_method ?? null, rec.amount, 'expense')
       await this.db.run('UPDATE recurring SET last_posted=? WHERE id=?', [month, id])
       await this.db.run(
         "INSERT INTO payment_log (kind, item_id, period, transaction_id, installment_payment_id, prev_value, amount) VALUES ('recurring',?,?,?,?,?,?)",
-        [id, month, tx.changes?.lastId ?? null, null, rec.last_posted ?? null, rec.amount]
+        [id, month, txId, null, rec.last_posted ?? null, rec.amount]
       )
     })
     return this.row<Recurring>(await this.db.query('SELECT * FROM recurring WHERE id=?', [id]))!
@@ -522,6 +611,8 @@ export class SqlDBService implements DBService {
 
     await this.db.batch(async () => {
       if (log.transaction_id != null) {
+        // Solo se devuelve lo que ese pago descontó (los marcados antes de la 2.2 no descontaron nada)
+        await this.revertBalanceMoves(log.transaction_id)
         await this.db.run('DELETE FROM transactions WHERE id=?', [log.transaction_id])
       }
       await this.db.run('UPDATE recurring SET last_posted=? WHERE id=?', [log.prev_value ?? null, id])
@@ -595,6 +686,8 @@ export class SqlDBService implements DBService {
     // Lo que cuelga del registro: [tabla, condición, parámetros]
     const dependents: [string, string, unknown[]][] = []
     if (kind === 'installment') dependents.push(['installment_payments', 'installment_id=?', [id]])
+    // Eliminar no toca los saldos, pero la anotación viaja con el movimiento por si se restaura
+    if (kind === 'transaction') dependents.push(['balance_moves', 'transaction_id=?', [id]])
     if (kind === 'installment' || kind === 'recurring') dependents.push(['payment_log', 'kind=? AND item_id=?', [kind, id]])
     if (kind === 'installment' || kind === 'recurring' || kind === 'debt') dependents.push(['reminders', 'kind=? AND item_id=?', [kind, id]])
 

@@ -149,6 +149,8 @@ export interface BackupData {
   payment_log?: import("./extra").PaymentLogEntry[]
   /** v2.1: recordatorios por registro */
   reminders?: import("./extra").ReminderSetting[]
+  /** v2.2: qué saldo movió cada movimiento (para deshacer y editar sin adivinar) */
+  balance_moves?: import("./extra").BalanceMoveRow[]
   /** v2.1: preferencias (moneda, días de pago, recordatorios). Nunca incluye la API Key. */
   preferences?: Record<string, unknown>
   /** v2.1: versión del esquema de la base que generó el respaldo */
