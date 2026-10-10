@@ -1,20 +1,18 @@
-import { useId, useMemo, useState } from 'react'
+import { useId, useState } from 'react'
 import { Check, CalendarDays } from 'lucide-react'
 import { CATEGORIES, CATEGORY_ICONS } from '@/types'
 import type { Category, TransactionType } from '@/types'
 import { amountErrorMessage, currencyInfo, currencySymbol, formatMoney, formatWhileTyping, parseMoney } from '@/lib/money'
 import { today } from '@/lib/dates'
 import { storageGet, storageSet } from '@/lib/storage'
-import { useAccounts, useCards } from '@/hooks/useLists'
 import { useFeedback } from '@/components/ui/Feedback'
+import { PaymentMethodField } from '@/components/ui/PaymentMethodField'
 import { db } from '@/lib/db'
 
 const LAST_METHOD_KEY = 'lukas_last_method'
 
 /** Registro manual en dos toques: monto + categoría. Funciona sin internet. */
 export function QuickAdd() {
-  const { accounts } = useAccounts()
-  const { cards } = useCards()
   const { toast } = useFeedback()
   const id = useId()
 
@@ -27,11 +25,6 @@ export function QuickAdd() {
   const [showDate, setShowDate] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const methods = useMemo(() => {
-    const names = [...accounts.map((a) => a.name), ...cards.map((c) => c.bank_name), 'Efectivo']
-    return Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)))
-  }, [accounts, cards])
 
   const currency = currencyInfo()
   const amount = parseMoney(amountText)
@@ -52,16 +45,17 @@ export function QuickAdd() {
     if (!category) { setError('Elige una categoría'); return }
     setSaving(true)
     setError(null)
+    const paymentMethod = method?.trim() || null
     try {
       const created = await db.createTransaction({
         amount,
         type,
         category,
         description: description.trim() || category,
-        payment_method: method,
+        payment_method: paymentMethod,
         date: date || today(),
       })
-      if (method) storageSet(LAST_METHOD_KEY, method)
+      if (paymentMethod) storageSet(LAST_METHOD_KEY, paymentMethod)
       toast({
         message: `${isIncome ? 'Ingreso' : 'Gasto'} de ${formatMoney(amount)} en ${category} guardado`,
         actionLabel: 'Deshacer',
@@ -145,29 +139,13 @@ export function QuickAdd() {
         </div>
       </div>
 
-      {methods.length > 0 && (
-        <div>
-          <p id={`${id}-metodo`} className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">¿Con qué pagaste? (opcional)</p>
-          <div role="group" aria-labelledby={`${id}-metodo`} className="flex flex-wrap gap-2">
-            {methods.map((m) => {
-              const active = method?.toLowerCase() === m.toLowerCase()
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setMethod(active ? null : m)}
-                  className={`px-3 py-2 rounded-full text-xs border transition-colors ${
-                    active ? 'bg-accent-cyan/15 border-accent-cyan text-accent-cyan' : 'bg-bg-card border-bg-border text-gray-400'
-                  }`}
-                >
-                  {m}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      <PaymentMethodField
+        value={method ?? ''}
+        onChange={(v) => setMethod(v || null)}
+        type={type}
+        label={isIncome ? '¿A dónde llegó? (opcional)' : '¿Con qué pagaste? (opcional)'}
+        labelClassName="text-[11px] text-gray-400 uppercase tracking-wide mb-2"
+      />
 
       <div className="flex gap-2">
         <label htmlFor={`${id}-desc`} className="sr-only">Descripción (opcional)</label>

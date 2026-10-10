@@ -3,6 +3,7 @@ import { Check, X, Edit3 } from 'lucide-react'
 import { formatCOP } from '@/lib/currency'
 import { CATEGORIES, CATEGORY_ICONS } from '@/types'
 import type { ParsedTransaction } from '@/types'
+import { PaymentMethodField } from '@/components/ui/PaymentMethodField'
 
 interface Props {
   data: ParsedTransaction
@@ -47,14 +48,12 @@ export function ConfirmTransaction({ data, onConfirm, onEdit, onCancel, loading 
             ))}
           </select>
         </div>
-        <div className="min-w-0">
-          <label htmlFor={`${id}-metodo`} className="text-xs text-gray-400 block mb-1">Método de pago</label>
-          <input
-            id={`${id}-metodo`}
+        <div className="col-span-2 min-w-0">
+          <PaymentMethodField
             value={data.payment_method ?? ''}
-            onChange={(e) => onEdit('payment_method', e.target.value || null)}
-            placeholder="Efectivo, Nu…"
-            className={fieldClass}
+            onChange={(v) => onEdit('payment_method', v.trim() ? v : null)}
+            type={data.type}
+            label="Método de pago"
           />
         </div>
         <div className="col-span-2 min-w-0">

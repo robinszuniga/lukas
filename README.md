@@ -26,7 +26,7 @@ Los datos viven solo en el dispositivo: no hay cuentas, servidores ni sincroniza
 
 ### Pagos: marcar y deshacer
 
-- **Pago fijo**: «Pagar» crea el gasto del mes. «Deshacer» borra ese gasto y lo deja pendiente otra vez.
+- **Pago fijo**: «Pagar» crea el gasto del mes y lo descuenta de la cuenta o tarjeta elegida. «Deshacer» borra ese gasto, devuelve lo descontado y lo deja pendiente otra vez. Los pagos marcados antes de la 2.2 no descontaban, así que al deshacerlos no se devuelve nada.
 - **Cuota**: «Pagar» suma una cuota, guarda el pago y avanza la fecha un mes. «Deshacer el último pago» devuelve cuotas, fecha e historial exactamente a como estaban.
 - **Deuda**: «Marcar saldada» y «Dejar pendiente».
 - Los pagos marcados con versiones anteriores a la 2.1 no tienen bitácora y no ofrecen «Deshacer».
@@ -42,7 +42,11 @@ Los datos viven solo en el dispositivo: no hay cuentas, servidores ni sincroniza
 
 - Todo registro se puede editar. Antes de eliminar se muestra qué registro es; después queda un aviso con «Deshacer» que lo restaura idéntico (con su historial de pagos y recordatorio, si los tenía).
 - Totales, presupuestos e historial se recalculan solos tras cualquier cambio.
-- **Saldos de cuentas y tarjetas**: se ajustan al *crear* un movimiento cuyo método de pago coincide con el nombre de una cuenta o tarjeta, y se revierten si ese registro se deshace en el momento. Editar o eliminar después un movimiento **no** recalcula esos saldos (pueden haberse ajustado a mano); el diálogo de eliminación lo avisa.
+- **Saldos de cuentas y tarjetas**: un movimiento mueve el saldo de la cuenta o tarjeta que se llama igual que su método de pago, sin importar mayúsculas, tildes ni espacios («SOBRE ALIMENTACIÓN» = «sobre alimentacion»). Un gasto baja el saldo de la cuenta y sube la deuda de la tarjeta; un ingreso, al revés.
+  - El método se elige con botones (cuentas, tarjetas y Efectivo) o en «Otro». Debajo se ve qué saldo se mueve; si el nombre no corresponde a ninguna cuenta ni tarjeta, se avisa que no se moverá ningún saldo.
+  - Se ajustan al *crear* un movimiento (Registrar rápido, Con IA) y al *pagar* un pago fijo. Lukas anota cuánto movió cada movimiento (tabla `balance_moves`), así «Deshacer» devuelve exactamente eso.
+  - **Editar**: si cambia el monto, el tipo o el método de pago, Lukas muestra el ajuste neto («Devolver $60.000 a Sobre», «Descontar $60.000 de Nequi») y pregunta: «Ajustar saldos y guardar» o «Solo guardar el cambio». En movimientos registrados antes de la 2.2 avisa que no sabe si ya se había descontado.
+  - **Eliminar** no recalcula saldos (pueden haberse ajustado a mano); el diálogo de eliminación lo avisa.
 
 ### Moneda y montos
 
@@ -60,8 +64,8 @@ Los datos viven solo en el dispositivo: no hay cuentas, servidores ni sincroniza
 ## Datos, migraciones y respaldos
 
 - Base SQLite (sql.js) guardada en IndexedDB.
-- **Migraciones** (`src/lib/db/schema.ts`): versión de esquema en `PRAGMA user_version`. Las tablas originales no se alteran; lo nuevo va en tablas nuevas (`payment_log`, `reminders`). Antes de migrar una base con datos se guarda una copia en IndexedDB (`copia-antes-de-migrar-v<n>.db`).
-- **Respaldo**: Ajustes → Exportar. Incluye movimientos, pagos, tarjetas, cuentas, metas, presupuestos, recordatorios, bitácora de pagos y preferencias (moneda, días de pago, recordatorios). No incluye la API Key.
+- **Migraciones** (`src/lib/db/schema.ts`): versión de esquema en `PRAGMA user_version`. Las tablas originales no se alteran; lo nuevo va en tablas nuevas (`payment_log`, `reminders` en v2; `balance_moves` en v3). Antes de migrar una base con datos se guarda una copia en IndexedDB (`copia-antes-de-migrar-v<n>.db`).
+- **Respaldo**: Ajustes → Exportar. Incluye movimientos, pagos, tarjetas, cuentas, metas, presupuestos, recordatorios, bitácora de pagos, ajustes de saldo por movimiento y preferencias (moneda, días de pago, recordatorios). No incluye la API Key.
 - **Importar**: se valida el archivo completo antes de tocar nada, se muestra qué trae y qué reemplaza, y solo se importa tras confirmar. Si algo falla, los datos actuales quedan intactos. Se aceptan los respaldos del Lukas anterior; los respaldos nuevos siguen siendo legibles por el Lukas anterior (que ignora las secciones que no conoce).
 
 ### Migrar desde el Lukas anterior

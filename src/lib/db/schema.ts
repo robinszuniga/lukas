@@ -114,8 +114,22 @@ CREATE TABLE IF NOT EXISTS reminders (
 );
 `
 
+/** v3 (Lukas 2.2): solo AGREGA una tabla. Qué saldo movió cada movimiento, para revertirlo exacto. */
+const V3_SCHEMA = `
+CREATE TABLE IF NOT EXISTS balance_moves (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  transaction_id INTEGER NOT NULL,
+  target         TEXT NOT NULL CHECK(target IN ('account','card')),
+  target_id      INTEGER NOT NULL,
+  delta          REAL NOT NULL,
+  created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_balance_moves_tx ON balance_moves(transaction_id);
+`
+
 export const MIGRATIONS: { version: number; description: string; sql: string }[] = [
   { version: 2, description: 'Bitácora de pagos y recordatorios (tablas nuevas)', sql: V2_SCHEMA },
+  { version: 3, description: 'Ajustes de saldo por movimiento (tabla nueva)', sql: V3_SCHEMA },
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version
@@ -124,7 +138,7 @@ export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version
 export const BACKUP_TABLES = [
   'transactions', 'installments', 'installment_payments',
   'goals', 'credit_cards', 'budgets', 'debts', 'accounts', 'recurring',
-  'payment_log', 'reminders',
+  'payment_log', 'reminders', 'balance_moves',
 ] as const
 
 export type TableName = (typeof BACKUP_TABLES)[number]
@@ -142,6 +156,7 @@ export const TABLE_COLUMNS: Record<TableName, readonly string[]> = {
   recurring: ['id', 'name', 'amount', 'category', 'payment_method', 'day', 'last_posted', 'created_at'],
   payment_log: ['id', 'kind', 'item_id', 'period', 'transaction_id', 'installment_payment_id', 'prev_value', 'amount', 'paid_at'],
   reminders: ['id', 'kind', 'item_id', 'enabled', 'days_before', 'snoozed_until'],
+  balance_moves: ['id', 'transaction_id', 'target', 'target_id', 'delta', 'created_at'],
 }
 
 export function isTableName(name: string): name is TableName {

@@ -39,6 +39,7 @@ const TABLE_LABELS: Record<TableName, string> = {
   recurring: 'pagos fijos',
   payment_log: 'bitácora de pagos',
   reminders: 'recordatorios',
+  balance_moves: 'ajustes de saldo',
 }
 
 export function tableLabel(table: TableName): string {
@@ -100,6 +101,12 @@ const ROW_CHECKS: Record<TableName, Check> = {
   reminders: (r) => first(
     need(r, 'kind', (v) => v === 'installment' || v === 'debt' || v === 'recurring', 'un tipo conocido'),
     need(r, 'item_id', isNum, 'un número'),
+  ),
+  balance_moves: (r) => first(
+    need(r, 'transaction_id', isNum, 'un número'),
+    need(r, 'target', (v) => v === 'account' || v === 'card', '"account" o "card"'),
+    need(r, 'target_id', isNum, 'un número'),
+    need(r, 'delta', isNum, 'un número'),
   ),
 }
 

@@ -4,14 +4,14 @@ import { formatCOP } from '@/lib/currency'
 import { formatDate } from '@/lib/dates'
 import { CATEGORY_ICONS } from '@/types'
 import type { Transaction, Category } from '@/types'
-import { EditTransactionModal } from './EditTransactionModal'
+import { EditTransactionModal, type SaveOptions } from './EditTransactionModal'
 import { iconButton } from '@/components/ui/styles'
 
 interface Props {
   transactions: Transaction[]
   /** Recibe el movimiento completo: quien lo llama muestra qué se va a eliminar */
   onDelete: (tx: Transaction) => void
-  onUpdate: (id: number, data: Partial<Transaction>) => Promise<void>
+  onUpdate: (id: number, data: Partial<Transaction>, options: SaveOptions) => Promise<void>
 }
 
 export function TransactionList({ transactions, onDelete, onUpdate }: Props) {
@@ -72,7 +72,7 @@ export function TransactionList({ transactions, onDelete, onUpdate }: Props) {
       {editing && (
         <EditTransactionModal
           transaction={editing}
-          onSave={(data) => onUpdate(editing.id, data)}
+          onSave={(data, options) => onUpdate(editing.id, data, options)}
           onClose={() => setEditing(null)}
         />
       )}

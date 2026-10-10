@@ -4,6 +4,7 @@ import { CATEGORIES } from '@/types'
 import type { Category, Recurring } from '@/types'
 import { Modal } from '@/components/ui/Modal'
 import { Field, FormError } from '@/components/ui/Field'
+import { PaymentMethodField } from '@/components/ui/PaymentMethodField'
 import { inputClass, primaryButton, secondaryButton } from '@/components/ui/styles'
 
 interface Props {
@@ -89,13 +90,11 @@ export function RecurringForm({ initial, onSave, onClose }: Props) {
           )}
         </Field>
 
-        <Field label="Método de pago (opcional)">
-          {(c) => <input {...c} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} placeholder="Nequi, Bancolombia…" className={inputClass} />}
-        </Field>
+        <PaymentMethodField value={paymentMethod} onChange={setPaymentMethod} label="¿De dónde sale? (opcional)" />
 
         {!initial && (
           <p className="text-xs text-gray-400">
-            Cada mes aparecerá como pendiente. Al tocar «Pagar» se crea el gasto automáticamente, y puedes deshacerlo.
+            Cada mes aparecerá como pendiente. Al tocar «Pagar» se crea el gasto y se descuenta de la cuenta elegida, y puedes deshacerlo.
           </p>
         )}
         <FormError message={error} />

@@ -13,6 +13,7 @@ import { getCurrencyCode, plainAmount } from '@/lib/money'
 import { CATEGORY_ICONS, CATEGORY_COLORS } from '@/types'
 import type { Transaction } from '@/types'
 import { iconButton } from '@/components/ui/styles'
+import { matchPaymentTargets } from '@/lib/paymentMethod'
 
 /** CSV con importes planos (punto decimal, sin miles) y la moneda en su propia columna. */
 function exportCSV(transactions: Transaction[], month: string) {
@@ -67,11 +68,7 @@ export function Historial() {
   }, [transactions, search])
 
   const handleDelete = (tx: Transaction) => {
-    const method = tx.payment_method?.trim().toLowerCase()
-    const linked = method
-      ? accounts.find((a) => a.name.trim().toLowerCase() === method)?.name
-        ?? cards.find((c) => c.bank_name.trim().toLowerCase() === method)?.bank_name
-      : undefined
+    const linked = matchPaymentTargets(tx.payment_method, accounts, cards)[0]?.name
 
     return confirmDelete({
       kind: 'transaction',

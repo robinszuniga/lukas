@@ -2,6 +2,7 @@ import type {
   Transaction, Installment, Goal, CreditCard, Budget, TransactionSummary, Debt, BackupData,
   Account, Recurring, InstallmentPayment,
   PaymentLogEntry, ReminderSetting, ReminderKind, EntityKind, DeletedSnapshot, RangeTotals, SpendStats,
+  BalancePlan,
 } from '@/types'
 import type { AIResult } from '@/lib/ai/validate'
 
@@ -19,7 +20,10 @@ export interface DBService {
   // Transactions
   listTransactions(filters?: TransactionFilters): Promise<Transaction[]>
   createTransaction(data: Omit<Transaction, 'id' | 'created_at'>): Promise<Transaction>
-  updateTransaction(id: number, data: Partial<Transaction>): Promise<Transaction>
+  /** Con `adjustBalances` devuelve a los saldos lo que el movimiento había movido y aplica lo nuevo */
+  updateTransaction(id: number, data: Partial<Transaction>, options?: { adjustBalances?: boolean }): Promise<Transaction>
+  /** Qué les pasaría a los saldos al editar un movimiento (no cambia nada) */
+  planBalanceUpdate(id: number, data: Partial<Transaction>): Promise<BalancePlan>
   deleteTransaction(id: number): Promise<void>
   getTransactionSummary(month: string): Promise<TransactionSummary>
   /** Ingresos y gastos entre dos fechas (incluidas) */

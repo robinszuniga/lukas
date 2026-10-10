@@ -268,6 +268,114 @@ describe('eliminar con copia y deshacer', () => {
   })
 })
 
+describe('saldos de cuentas y tarjetas', () => {
+  const balanceOf = async (id: number) => (await db.listAccounts()).find((a) => a.id === id)?.balance
+  const debtOf = async (id: number) => (await db.listCards()).find((c) => c.id === id)?.current_balance
+
+  it('descuenta aunque el nombre tenga mayúsculas con tilde o Ñ, o se escriba sin tildes', async () => {
+    const sobre = await db.createAccount({ name: 'SOBRE ALIMENTACIÓN', balance: 300_000, color: '#fff' })
+    await db.createTransaction(expense({ amount: 50_000, payment_method: 'SOBRE ALIMENTACIÓN' }))
+    await db.createTransaction(expense({ amount: 20_000, payment_method: 'sobre alimentacion' }))
+    expect(await balanceOf(sobre.id)).toBe(230_000)
+
+    const napa = await db.createAccount({ name: 'Ñapa', balance: 10_000, color: '#fff' })
+    await db.createTransaction(expense({ amount: 1_000, payment_method: 'ñapa' }))
+    expect(await balanceOf(napa.id)).toBe(9_000)
+  })
+
+  it('sin cuenta con ese nombre guarda el gasto y no toca ningún saldo', async () => {
+    const acc = await db.createAccount({ name: 'Sobre mercado', balance: 300_000, color: '#fff' })
+    await db.createTransaction(expense({ payment_method: 'Sobre' }))
+    expect(await balanceOf(acc.id)).toBe(300_000)
+    expect(await db.listTransactions()).toHaveLength(1)
+  })
+
+  it('pago fijo: «Pagar» descuenta de la cuenta y «Deshacer» lo devuelve', async () => {
+    const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const rec = await db.createRecurring({ name: 'Mercado', amount: 50_000, category: 'Alimentación', payment_method: 'sobre', day: 1 })
+    await db.postRecurring(rec.id)
+    expect(await balanceOf(acc.id)).toBe(250_000)
+    await db.undoPostRecurring(rec.id)
+    expect(await balanceOf(acc.id)).toBe(300_000)
+  })
+
+  it('pago fijo marcado antes de esta versión: deshacer no devuelve plata que nunca se descontó', async () => {
+    const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const rec = await db.createRecurring({ name: 'Mercado', amount: 50_000, category: 'Alimentación', payment_method: 'Sobre', day: 1 })
+    await db.postRecurring(rec.id)
+    // Así quedaba con la versión anterior: gasto creado, saldo intacto y sin anotación
+    raw.run('DELETE FROM balance_moves')
+    raw.run('UPDATE accounts SET balance = 300000')
+    await db.undoPostRecurring(rec.id)
+    expect(await balanceOf(acc.id)).toBe(300_000)
+  })
+
+  it('tarjeta: un abono no deja la deuda bajo cero y deshacerlo devuelve solo lo que cambió', async () => {
+    const card = await db.createCard({ bank_name: 'Nu', last_four: null, credit_limit: 1_000_000, current_balance: 30_000, billing_day: null, cutoff_day: null, color: '#000' })
+    const tx = await db.createTransaction(expense({ type: 'income', amount: 50_000, payment_method: 'Nu' }))
+    expect(await debtOf(card.id)).toBe(0)
+    await db.undoCreateTransaction(tx.id)
+    expect(await debtOf(card.id)).toBe(30_000)
+  })
+
+  it('editar: propone el ajuste neto y solo lo aplica si se pide', async () => {
+    const sobre = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const nequi = await db.createAccount({ name: 'Nequi', balance: 100_000, color: '#fff' })
+    const tx = await db.createTransaction(expense({ amount: 50_000, payment_method: null }))
+
+    // Solo cambiar la descripción no mueve saldos
+    expect(await db.planBalanceUpdate(tx.id, { description: 'otra' })).toEqual({ moves: [], untracked: [] })
+
+    // Elegir el sobre después de guardarlo
+    expect(await db.planBalanceUpdate(tx.id, { payment_method: 'Sobre' })).toEqual({
+      moves: [{ target: 'account', target_id: sobre.id, name: 'Sobre', delta: -50_000 }],
+      untracked: [],
+    })
+    await db.updateTransaction(tx.id, { payment_method: 'Sobre' }, { adjustBalances: true })
+    expect(await balanceOf(sobre.id)).toBe(250_000)
+
+    // Subir el monto: solo la diferencia
+    expect((await db.planBalanceUpdate(tx.id, { amount: 60_000 })).moves).toEqual([
+      { target: 'account', target_id: sobre.id, name: 'Sobre', delta: -10_000 },
+    ])
+    await db.updateTransaction(tx.id, { amount: 60_000 }, { adjustBalances: true })
+    expect(await balanceOf(sobre.id)).toBe(240_000)
+
+    // Cambiar de cuenta: se devuelve a una y se descuenta de la otra
+    expect((await db.planBalanceUpdate(tx.id, { payment_method: 'Nequi' })).moves).toEqual([
+      { target: 'account', target_id: sobre.id, name: 'Sobre', delta: 60_000 },
+      { target: 'account', target_id: nequi.id, name: 'Nequi', delta: -60_000 },
+    ])
+
+    // «Solo guardar»: el movimiento cambia, los saldos no, y lo anotado sigue siendo lo real
+    await db.updateTransaction(tx.id, { payment_method: 'Nequi' })
+    expect(await balanceOf(sobre.id)).toBe(240_000)
+    expect(await balanceOf(nequi.id)).toBe(100_000)
+    await db.undoCreateTransaction(tx.id)
+    expect(await balanceOf(sobre.id)).toBe(300_000)
+  })
+
+  it('editar un movimiento de antes de esta versión avisa que no se sabe si ya se descontó', async () => {
+    await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const tx = await db.createTransaction(expense({ amount: 50_000, payment_method: 'Sobre' }))
+    raw.run('DELETE FROM balance_moves')
+    const plan = await db.planBalanceUpdate(tx.id, { amount: 60_000 })
+    expect(plan.untracked).toEqual(['Sobre'])
+    expect(plan.moves.map((m) => m.delta)).toEqual([-60_000])
+  })
+
+  it('eliminar no toca saldos y restaurar trae de vuelta la anotación', async () => {
+    const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const tx = await db.createTransaction(expense({ amount: 50_000, payment_method: 'Sobre' }))
+    const snap = await db.deleteWithSnapshot('transaction', tx.id)
+    expect(await balanceOf(acc.id)).toBe(250_000)
+    expect(scalar('SELECT COUNT(*) FROM balance_moves')).toBe(0)
+    await db.restoreSnapshot(snap)
+    await db.undoCreateTransaction(tx.id)
+    expect(await balanceOf(acc.id)).toBe(300_000)
+  })
+})
+
 describe('respaldo: exportar e importar', () => {
   const v1Backup = (): BackupData => ({
     version: 1,
@@ -310,7 +418,8 @@ describe('respaldo: exportar e importar', () => {
   })
 
   it('exporta todo, vuelve a importarlo igual y sigue siendo legible por el Lukas anterior', async () => {
-    await db.createTransaction(expense())
+    await db.createAccount({ name: 'Nequi', balance: 500_000, color: '#3b82f6' })
+    await db.createTransaction(expense({ payment_method: 'Nequi' }))
     await db.upsertBudget('Alimentación', 900_000)
     const rec = await db.createRecurring({ name: 'Arriendo', amount: 900_000, category: 'Servicios', payment_method: null, day: 1 })
     await db.postRecurring(rec.id)
@@ -321,6 +430,7 @@ describe('respaldo: exportar e importar', () => {
     expect(backup.budgets).toHaveLength(1)
     expect(backup.payment_log).toHaveLength(1)
     expect(backup.reminders).toHaveLength(1)
+    expect(backup.balance_moves).toHaveLength(1)
 
     // El importador viejo inserta columna por columna: no puede haber columnas nuevas en sus tablas
     for (const table of ORIGINAL_TABLES) {
