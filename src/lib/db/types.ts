@@ -24,6 +24,8 @@ export interface DBService {
   updateTransaction(id: number, data: Partial<Transaction>, options?: { adjustBalances?: boolean }): Promise<Transaction>
   /** Qué les pasaría a los saldos al editar un movimiento (no cambia nada) */
   planBalanceUpdate(id: number, data: Partial<Transaction>): Promise<BalancePlan>
+  /** Qué les devolvería a los saldos eliminar un movimiento (no cambia nada) */
+  planTransactionDelete(id: number): Promise<BalancePlan>
   deleteTransaction(id: number): Promise<void>
   getTransactionSummary(month: string): Promise<TransactionSummary>
   /** Ingresos y gastos entre dos fechas (incluidas) */
@@ -93,7 +95,7 @@ export interface DBService {
     patch: Partial<Pick<ReminderSetting, 'enabled' | 'days_before' | 'snoozed_until'>>,
   ): Promise<ReminderSetting>
 
-  // Eliminar con copia y restaurar ("Deshacer")
+  // Eliminar con copia y restaurar ("Deshacer"). Un movimiento devuelve a los saldos lo que había movido.
   deleteWithSnapshot(kind: EntityKind, id: number): Promise<DeletedSnapshot>
   restoreSnapshot(snapshot: DeletedSnapshot): Promise<void>
 

@@ -334,7 +334,7 @@ export function Tarjetas() {
             </ul>
           )}
           <p className="text-xs text-gray-400 mt-4">
-            Al registrar un movimiento o pagar un pago fijo con el nombre de una cuenta, su saldo se ajusta solo. Si editas el movimiento, Lukas te pregunta si ajustar el saldo; si lo eliminas, corrígelo aquí.
+            Al registrar un movimiento o pagar un pago fijo con el nombre de una cuenta, su saldo se ajusta solo. Si editas el movimiento, Lukas te pregunta si ajustar el saldo; si lo eliminas, devuelve lo que había descontado.
           </p>
         </section>
       )}

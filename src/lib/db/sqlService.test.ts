@@ -364,15 +364,63 @@ describe('saldos de cuentas y tarjetas', () => {
     expect(plan.moves.map((m) => m.delta)).toEqual([-60_000])
   })
 
-  it('eliminar no toca saldos y restaurar trae de vuelta la anotación', async () => {
+  it('eliminar devuelve lo descontado y «Deshacer» lo vuelve a descontar', async () => {
     const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
     const tx = await db.createTransaction(expense({ amount: 50_000, payment_method: 'Sobre' }))
+    expect(await db.planTransactionDelete(tx.id)).toEqual({
+      moves: [{ target: 'account', target_id: acc.id, name: 'Sobre', delta: 50_000 }],
+      untracked: [],
+    })
+
     const snap = await db.deleteWithSnapshot('transaction', tx.id)
-    expect(await balanceOf(acc.id)).toBe(250_000)
+    expect(await balanceOf(acc.id)).toBe(300_000)
     expect(scalar('SELECT COUNT(*) FROM balance_moves')).toBe(0)
+
     await db.restoreSnapshot(snap)
+    expect(await balanceOf(acc.id)).toBe(250_000)
+    expect(await db.listTransactions()).toEqual([tx])
+    // La anotación volvió: deshacer el registro sigue devolviendo exacto
     await db.undoCreateTransaction(tx.id)
     expect(await balanceOf(acc.id)).toBe(300_000)
+  })
+
+  it('eliminar un ingreso le quita a la cuenta; un gasto con tarjeta baja la deuda', async () => {
+    const acc = await db.createAccount({ name: 'Nequi', balance: 100_000, color: '#fff' })
+    const card = await db.createCard({ bank_name: 'Nu', last_four: null, credit_limit: 1_000_000, current_balance: 0, billing_day: null, cutoff_day: null, color: '#000' })
+    const sueldo = await db.createTransaction(expense({ type: 'income', amount: 1_000_000, payment_method: 'Nequi' }))
+    const compra = await db.createTransaction(expense({ amount: 80_000, payment_method: 'nu' }))
+    expect(await balanceOf(acc.id)).toBe(1_100_000)
+    expect(await debtOf(card.id)).toBe(80_000)
+
+    await db.deleteWithSnapshot('transaction', sueldo.id)
+    await db.deleteWithSnapshot('transaction', compra.id)
+    expect(await balanceOf(acc.id)).toBe(100_000)
+    expect(await debtOf(card.id)).toBe(0)
+  })
+
+  it('eliminar un movimiento sin cuenta, o de una cuenta ya borrada, no toca saldos', async () => {
+    const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const sinCuenta = await db.createTransaction(expense({ payment_method: 'Efectivo' }))
+    await db.deleteWithSnapshot('transaction', sinCuenta.id)
+    expect(await balanceOf(acc.id)).toBe(300_000)
+
+    const otra = await db.createAccount({ name: 'Viaje', balance: 50_000, color: '#fff' })
+    const tx = await db.createTransaction(expense({ amount: 10_000, payment_method: 'Viaje' }))
+    await db.deleteWithSnapshot('account', otra.id)
+    expect(await db.planTransactionDelete(tx.id)).toEqual({ moves: [], untracked: [] })
+    const snap = await db.deleteWithSnapshot('transaction', tx.id)
+    await db.restoreSnapshot(snap)
+    expect(await db.listTransactions()).toEqual([tx])
+    expect(await balanceOf(acc.id)).toBe(300_000)
+  })
+
+  it('eliminar un movimiento de antes de esta versión no devuelve nada y lo avisa', async () => {
+    const acc = await db.createAccount({ name: 'Sobre', balance: 300_000, color: '#fff' })
+    const tx = await db.createTransaction(expense({ amount: 50_000, payment_method: 'Sobre' }))
+    raw.run('DELETE FROM balance_moves')
+    expect(await db.planTransactionDelete(tx.id)).toEqual({ moves: [], untracked: ['Sobre'] })
+    await db.deleteWithSnapshot('transaction', tx.id)
+    expect(await balanceOf(acc.id)).toBe(250_000)
   })
 })
 

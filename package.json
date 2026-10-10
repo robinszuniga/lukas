@@ -1,6 +1,6 @@
 {
   "name": "lukas",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Lukas — finanzas del día a día, sencillas. PWA para el celular.",
   "type": "module",
