@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Check, Undo2, X } from 'lucide-react'
-import { Modal } from './Modal'
+import { Modal, useAnyDialogOpen } from './Modal'
 import { dangerButton, primaryButton, secondaryButton } from './styles'
 
 export interface ConfirmOptions {
@@ -111,6 +111,25 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const api = useMemo(() => ({ confirm, toast }), [confirm, toast])
   const isError = toastState?.tone === 'error'
+  // Con un diálogo abierto el aviso va arriba: abajo taparía sus botones
+  const dialogOpen = useAnyDialogOpen()
+
+  // Espacio que ocupa el aviso: los diálogos empiezan debajo de él y la página
+  // deja ese espacio al final, para que nada quede tapado sin poder alcanzarlo.
+  const toastRef = useRef<HTMLDivElement>(null)
+  const toastKey = toastState?.key
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const el = toastRef.current
+    const update = () => root.style.setProperty('--toast-space', el ? `${el.offsetHeight + 16}px` : '0px')
+    update()
+    const observer = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    if (el) observer?.observe(el)
+    return () => {
+      observer?.disconnect()
+      root.style.setProperty('--toast-space', '0px')
+    }
+  }, [toastKey])
 
   return (
     <FeedbackContext.Provider value={api}>
@@ -121,13 +140,16 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       {/* Región viva: los lectores de pantalla anuncian cada aviso al aparecer */}
       <div
         className="fixed left-0 right-0 z-[70] px-4 pointer-events-none"
-        style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
+        style={dialogOpen
+          ? { top: 'calc(1rem + env(safe-area-inset-top, 0px))' }
+          : { bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
         role={isError ? 'alert' : 'status'}
         aria-live={isError ? 'assertive' : 'polite'}
       >
         {toastState && (
           <div
             key={toastState.key}
+            ref={toastRef}
             onMouseEnter={pause}
             onMouseLeave={resume}
             onFocus={pause}

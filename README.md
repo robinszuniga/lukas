@@ -41,6 +41,7 @@ Los datos viven solo en el dispositivo: no hay cuentas, servidores ni sincroniza
 ### Editar, eliminar y deshacer
 
 - Todo registro se puede editar. Antes de eliminar se muestra qué registro es; después queda un aviso con «Deshacer» que lo restaura idéntico (con su historial de pagos y recordatorio, si los tenía).
+- El aviso con «Deshacer» no tapa botones: con una ventana abierta aparece arriba y la ventana empieza debajo de él; sin ventana, la página deja su espacio al final para poder bajar hasta lo que quede detrás.
 - Totales, presupuestos e historial se recalculan solos tras cualquier cambio.
 - **Saldos de cuentas y tarjetas**: un movimiento mueve el saldo de la cuenta o tarjeta que se llama igual que su método de pago, sin importar mayúsculas, tildes ni espacios («SOBRE ALIMENTACIÓN» = «sobre alimentacion»). Un gasto baja el saldo de la cuenta y sube la deuda de la tarjeta; un ingreso, al revés.
   - El método se elige con botones (cuentas, tarjetas y Efectivo) o en «Otro». Debajo se ve qué saldo se mueve; si el nombre no corresponde a ninguna cuenta ni tarjeta, se avisa que no se moverá ningún saldo.

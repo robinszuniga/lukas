@@ -1,6 +1,26 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { iconButton } from './styles'
+
+// Cuántos diálogos hay abiertos. Mientras haya alguno, el aviso de «Deshacer» se
+// muestra arriba para no tapar los botones del diálogo (que viven abajo).
+let openDialogs = 0
+const dialogListeners = new Set<() => void>()
+
+function changeOpenDialogs(delta: number) {
+  openDialogs = Math.max(0, openDialogs + delta)
+  dialogListeners.forEach((l) => l())
+}
+
+function subscribeDialogs(listener: () => void) {
+  dialogListeners.add(listener)
+  return () => { dialogListeners.delete(listener) }
+}
+
+/** ¿Hay algún diálogo abierto? */
+export function useAnyDialogOpen(): boolean {
+  return useSyncExternalStore(subscribeDialogs, () => openDialogs > 0)
+}
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
@@ -18,6 +38,7 @@ export function useDialog(onClose: () => void) {
   useEffect(() => {
     const node = ref.current
     const previous = document.activeElement as HTMLElement | null
+    changeOpenDialogs(1)
 
     const focusables = () =>
       node ? Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null) : []
@@ -45,6 +66,7 @@ export function useDialog(onClose: () => void) {
 
     document.addEventListener('keydown', onKey, true)
     return () => {
+      changeOpenDialogs(-1)
       document.removeEventListener('keydown', onKey, true)
       if (previous && document.contains(previous)) previous.focus()
     }
@@ -80,7 +102,9 @@ export function Modal({ title, onClose, children, footer, role = 'dialog', descr
         aria-labelledby={titleId}
         aria-describedby={describedBy}
         tabIndex={-1}
-        className="bg-bg-card border border-bg-border rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[85dvh] flex flex-col shadow-2xl"
+        className="bg-bg-card border border-bg-border rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md flex flex-col shadow-2xl"
+        // Si hay un aviso arriba, el diálogo empieza debajo de él
+        style={{ maxHeight: 'min(85dvh, calc(100dvh - var(--toast-space, 0px) - 1rem))' }}
       >
         <div className="flex items-center justify-between gap-3 pl-5 pr-3 py-3 border-b border-bg-border shrink-0">
           <h2 id={titleId} className="font-semibold text-white text-sm">{title}</h2>

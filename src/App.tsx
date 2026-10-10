@@ -94,7 +94,13 @@ function AppInner() {
       >
         Saltar al contenido
       </a>
-      <main id="contenido" tabIndex={-1} className="max-w-lg lg:max-w-2xl mx-auto pb-24 outline-none">
+      {/* Al final queda espacio para la barra de abajo y, si hay un aviso, también para él */}
+      <main
+        id="contenido"
+        tabIndex={-1}
+        className="max-w-lg lg:max-w-2xl mx-auto outline-none"
+        style={{ paddingBottom: 'calc(6rem + var(--toast-space, 0px))' }}
+      >
         <Routes>
           <Route path="/" element={<Hoy />} />
           <Route path="/registrar" element={<Registrar />} />

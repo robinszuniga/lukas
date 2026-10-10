@@ -20,7 +20,7 @@ import { notificationStatus, requestNotificationPermission } from '@/lib/notific
 import { NEVER_SHARED, SHARED_ALWAYS, SHARED_ON_QUESTIONS } from '@/lib/ai/privacy'
 import { formatDate } from '@/lib/dates'
 
-const APP_VERSION = '2.3.0'
+const APP_VERSION = '2.3.1'
 
 const card = 'bg-bg-card border border-bg-border rounded-2xl p-4'
 const sectionTitle = 'text-sm font-medium text-white flex items-center gap-2 mb-1'
